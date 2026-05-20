@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #fafaf7;
+  --color-on-background: #0a0a0a;
+  --color-surface: #ffffff;
+  --color-on-surface: #0a0a0a;
+  --color-on-surface-variant: #525252;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #fafaf7;
+  --color-surface-container: #f4f3ef;
+  --color-surface-container-high: #ebe7e1;
+  --color-surface-container-highest: #e0dcd5;
+  --color-surface-variant: #ebe7e1;
+
+  --color-primary: #a30001;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #7a0001;
+  --color-on-primary-container: #ffe5e5;
+
+  --color-secondary: #adc6ff;
+  --color-on-secondary: #002e69;
+  --color-secondary-container: #4b8eff;
+
+  --color-tertiary: #6b6b6b;
+  --color-on-tertiary-container: #1c1c1c;
+
+  --color-error: #b91c1c;
+  --color-outline: #a3a3a3;
+  --color-outline-variant: #d4d4d0;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+html {
+  background: #fafaf7;
+}
+
+body {
+  background: #fafaf7;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  selection-background-color: rgba(163, 0, 1, 0.3);
+}
+
+::selection {
+  background: rgba(163, 0, 1, 0.3);
+}
+
+.glass-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.ai-glow {
+  box-shadow: 0 12px 48px -12px rgba(163, 0, 1, 0.25);
+}
