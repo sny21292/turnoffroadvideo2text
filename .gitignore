@@ -24,3 +24,6 @@ yarn-error.log*
 
 # Stray root files we don't want in the repo
 /package-lock.json
+
+# Local-only docs (kept on Mac, not pushed)
+/DOCUMENTATION.md
