@@ -93,18 +93,6 @@ export async function login(email: string, password: string) {
   return data.user;
 }
 
-export async function register(name: string, email: string, password: string) {
-  const data = await apiFetch<{ token: string; user: ApiUser }>(
-    "/auth/register",
-    {
-      method: "POST",
-      body: JSON.stringify({ name, email, password }),
-    }
-  );
-  saveSession(data.token, data.user);
-  return data.user;
-}
-
 export function logout() {
   clearSession();
 }

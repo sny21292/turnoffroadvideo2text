@@ -36,20 +36,12 @@ export function TopNav() {
             </Link>
           )}
           {ready && !user && (
-            <>
-              <Link
-                href="/login"
-                className="text-base text-on-surface-variant hover:text-on-surface transition-colors"
-              >
-                Log in
-              </Link>
-              <Link
-                href="/register"
-                className="bg-primary text-on-primary px-4 py-2 rounded-lg font-semibold hover:shadow-[0_0_18px_rgba(163,0,1,0.45)] transition-all"
-              >
-                Sign up
-              </Link>
-            </>
+            <Link
+              href="/login"
+              className="bg-primary text-on-primary px-4 py-2 rounded-lg font-semibold hover:shadow-[0_0_18px_rgba(163,0,1,0.45)] transition-all"
+            >
+              Log in
+            </Link>
           )}
           {ready && user && (
             <div className="flex items-center gap-3">
@@ -128,22 +120,13 @@ export function TopNav() {
               </Link>
             )}
             {ready && !user && (
-              <>
-                <Link
-                  href="/login"
-                  onClick={() => setMenuOpen(false)}
-                  className="px-3 py-2 rounded-lg hover:bg-black/5 text-on-surface"
-                >
-                  Log in
-                </Link>
-                <Link
-                  href="/register"
-                  onClick={() => setMenuOpen(false)}
-                  className="px-3 py-2 rounded-lg bg-primary text-on-primary text-center font-semibold"
-                >
-                  Sign up
-                </Link>
-              </>
+              <Link
+                href="/login"
+                onClick={() => setMenuOpen(false)}
+                className="px-3 py-2 rounded-lg bg-primary text-on-primary text-center font-semibold"
+              >
+                Log in
+              </Link>
             )}
             {ready && user && (
               <button

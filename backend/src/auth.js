@@ -20,27 +20,6 @@ function publicUser(u) {
   return { id: u.id, name: u.name, email: u.email };
 }
 
-router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body || {};
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: "Name, email and password are required." });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: "Password must be at least 6 characters." });
-  }
-  const normalized = String(email).trim().toLowerCase();
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(normalized);
-  if (existing) {
-    return res.status(409).json({ error: "An account with this email already exists." });
-  }
-  const hash = await bcrypt.hash(password, 10);
-  const result = db
-    .prepare("INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)")
-    .run(String(name).trim(), normalized, hash);
-  const user = db.prepare("SELECT id, name, email FROM users WHERE id = ?").get(result.lastInsertRowid);
-  return res.status(201).json({ token: sign(user), user: publicUser(user) });
-});
-
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {

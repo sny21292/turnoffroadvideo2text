@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { AuthShell } from "../components/AuthShell";
@@ -36,14 +35,7 @@ function LoginInner() {
     <AuthShell
       title="Welcome back"
       subtitle="Log in to keep working on your installation guides."
-      footer={
-        <>
-          Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-primary font-semibold hover:underline">
-            Create one
-          </Link>
-        </>
-      }
+      footer={null}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
         <Field

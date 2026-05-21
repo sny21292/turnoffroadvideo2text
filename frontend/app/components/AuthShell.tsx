@@ -88,9 +88,11 @@ export function AuthShell({
 
             <div className="mt-8">{children}</div>
 
-            <div className="mt-8 pt-6 border-t border-black/5 text-sm text-on-surface-variant text-center">
-              {footer}
-            </div>
+            {footer && (
+              <div className="mt-8 pt-6 border-t border-black/5 text-sm text-on-surface-variant text-center">
+                {footer}
+              </div>
+            )}
           </div>
         </section>
       </div>
