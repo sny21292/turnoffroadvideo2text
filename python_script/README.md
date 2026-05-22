@@ -84,8 +84,8 @@ That folder already exists on the droplet (`159.203.184.236`) and is writable. T
 
 ## How to work in this repo
 
-- The repo is `git@github.com:sny21292/turnoffroadvideo2text.git`, default branch `master`.
-- **Push your work to a new branch** (e.g. `python-pipeline` or `feature/python-service`), **not directly to `master`**. Sunil will review and merge once your service is ready and the Node backend has been updated to call it.
+- The repo is `git@github.com:sny21292/turnoffroadvideo2text.git`, default branch **`main`**.
+- **Push your work to a new branch** (e.g. `python-pipeline` or `feature/python-service`), **not directly to `main`**. Sunil will review and merge via a PR once your service is ready and the Node backend has been updated to call it.
 - Put your service code in this `python_script/` folder. Suggested layout (do whatever fits your tooling):
   ```
   python_script/

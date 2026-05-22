@@ -352,7 +352,7 @@ Then `pm2 restart v2t-api`.
 ```bash
 ssh root@your-droplet
 cd /var/www/Video2Text
-git pull origin master
+git pull origin main
 
 # backend changed?
 cd backend && npm ci && pm2 restart v2t-api
