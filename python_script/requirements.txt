@@ -1,0 +1,25 @@
+# YouTube → Word pipeline + HTTP API (Python 3.11+)
+#
+# System tools (install separately — not via pip):
+#   ffmpeg, ffprobe   Windows: winget install Gyan.FFmpeg
+#                     Linux:   sudo apt install ffmpeg
+#   yt-dlp            pip install yt-dlp  (must be on PATH)
+
+# ── Pipeline core ─────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.0
+anthropic>=0.40.0
+openai>=1.50.0
+google-genai>=1.0.0
+python-docx>=1.1.0
+Pillow>=10.0.0
+numpy>=1.26.0
+yt-dlp>=2024.0.0
+
+# Recommended (QR in Word header, sharper frame scoring)
+qrcode[pil]>=7.4
+scipy>=1.11.0
+
+# ── HTTP API (api_server.py) ──────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0

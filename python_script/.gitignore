@@ -1,36 +1,3 @@
-# Editor / IDE
-.vscode/
-.idea/
-*.swp
-.DS_Store
-
-# Claude Code
-.claude/
-
-# Node
-node_modules/
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Env files (never commit secrets)
-.env
-.env.local
-.env.production
-.env.*.local
-
-
-# Stray root files we don't want in the repo
-/package-lock.json
-
-# Local-only docs (kept on Mac, not pushed)
-/DOCUMENTATION.md
-
-
-#from Osas
 # Secrets
 .env
 .env.local
@@ -85,4 +52,3 @@ desktop.ini
 _empty_tmp/
 *.tmp
 ~$*.docx
-
