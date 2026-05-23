@@ -899,6 +899,30 @@ def validate_config() -> None:
 # VIDEO DOWNLOAD / NORMALIZE
 # ─────────────────────────────────────────────
 
+def _yt_dlp_auth_args() -> list[str]:
+    """
+    Production-only auth flags appended to every yt-dlp call.
+    Both env vars default to empty (dev laptops on residential IPs need nothing).
+    On the droplet we set:
+      YT_DLP_COOKIES_FILE=/etc/yt-dlp/cookies.txt   bypasses YouTube bot-detection
+                                                    on datacenter IPs by reusing a
+                                                    logged-in browser session.
+      YT_DLP_REMOTE_COMPONENTS=ejs:github           auto-downloads the EJS challenge
+                                                    solver scripts from yt-dlp's
+                                                    official release artifacts; needed
+                                                    by the n-sig JS challenge that
+                                                    YouTube's newer player emits.
+    """
+    args: list[str] = []
+    cookies_file = os.getenv("YT_DLP_COOKIES_FILE", "").strip()
+    if cookies_file:
+        args.extend(["--cookies", cookies_file])
+    remote_components = os.getenv("YT_DLP_REMOTE_COMPONENTS", "").strip()
+    if remote_components:
+        args.extend(["--remote-components", remote_components])
+    return args
+
+
 def _yt_dlp_base_cmd() -> list[str]:
     """Shared yt-dlp flags for downloads (resume-friendly, more retries on flaky links)."""
     return [
@@ -911,6 +935,7 @@ def _yt_dlp_base_cmd() -> list[str]:
         "--continue",
         "--write-info-json",
         "--merge-output-format", "mp4",
+        *_yt_dlp_auth_args(),
     ]
 
 
@@ -1129,6 +1154,7 @@ async def get_video_title(url: str, output_dir: Optional[Path] = None) -> str:
             [
                 "yt-dlp", "--no-check-certificates", "--no-playlist",
                 "--retries", "2", "--fragment-retries", "2",
+                *_yt_dlp_auth_args(),
                 "--get-title", url,
             ],
             step_label="yt-title", retries=1, timeout=YT_DLP_TITLE_TIMEOUT_SEC,
