@@ -33,4 +33,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, created_at DESC);
 `);
 
+// Idempotent migrations — safe to re-run on every boot.
+const jobsColumns = new Set(
+  db.prepare("PRAGMA table_info(jobs)").all().map((c) => c.name)
+);
+if (!jobsColumns.has("python_job_id")) {
+  db.exec("ALTER TABLE jobs ADD COLUMN python_job_id TEXT");
+}
+if (!jobsColumns.has("output_filename")) {
+  db.exec("ALTER TABLE jobs ADD COLUMN output_filename TEXT");
+}
+
 module.exports = db;

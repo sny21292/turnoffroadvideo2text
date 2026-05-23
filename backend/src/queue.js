@@ -1,17 +1,30 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { spawn } = require("child_process");
 const db = require("./db");
 
-const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(__dirname, "..", "output"));
+const OUTPUT_DIR = path.resolve(
+  process.env.OUTPUT_DIR || path.join(__dirname, "..", "output")
+);
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
-const PYTHON_SCRIPT = process.env.PYTHON_SCRIPT || "";
+const PYTHON_SERVICE_URL = (
+  process.env.PYTHON_SERVICE_URL || "http://127.0.0.1:4000"
+).replace(/\/$/, "");
+const PYTHON_SERVICE_API_KEY = process.env.PYTHON_SERVICE_API_KEY || "";
+const POLL_INTERVAL_MS = Number(process.env.PYTHON_POLL_INTERVAL_MS || 3000);
+const JOB_TIMEOUT_MS = Number(
+  process.env.PYTHON_JOB_TIMEOUT_MS || 60 * 60 * 1000
+); // 60 min default
 
 const queue = [];
 let running = false;
+
+function authHeaders() {
+  return PYTHON_SERVICE_API_KEY
+    ? { Authorization: `Bearer ${PYTHON_SERVICE_API_KEY}` }
+    : {};
+}
 
 function enqueue(userId, url) {
   const id = crypto.randomUUID();
@@ -26,7 +39,9 @@ function enqueue(userId, url) {
 function setStatus(id, patch) {
   const fields = Object.keys(patch);
   const values = fields.map((k) => patch[k]);
-  const sql = `UPDATE jobs SET ${fields.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`;
+  const sql = `UPDATE jobs SET ${fields
+    .map((k) => `${k} = ?`)
+    .join(", ")} WHERE id = ?`;
   db.prepare(sql).run(...values, id);
 }
 
@@ -49,59 +64,102 @@ function drain() {
     });
 }
 
-function runJob(id) {
-  return new Promise((resolve, reject) => {
-    const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id);
-    if (!job) return resolve();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    const outputPath = path.join(OUTPUT_DIR, `${id}.pdf`);
-    setStatus(id, { status: "started" });
+async function runJob(id) {
+  const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id);
+  if (!job) return;
 
-    if (!PYTHON_SCRIPT || !fs.existsSync(PYTHON_SCRIPT)) {
-      // Fallback for local dev: write a tiny placeholder PDF so the flow
-      // is testable before the client's Python script is wired up.
-      const minimalPdf = Buffer.from(
-        "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF",
-        "utf8"
+  setStatus(id, { status: "started" });
+
+  // 1) Submit job to Python pipeline
+  let pythonJobId;
+  try {
+    const resp = await fetch(`${PYTHON_SERVICE_URL}/api/v1/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ youtube_url: job.url }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(
+        `Pipeline returned HTTP ${resp.status}: ${body.slice(0, 300)}`
       );
-      fs.writeFile(outputPath, minimalPdf, (err) => {
-        if (err) return reject(err);
-        setStatus(id, {
-          status: "finished",
-          output_path: outputPath,
-          finished_at: new Date().toISOString(),
-        });
-        resolve();
+    }
+    const data = await resp.json();
+    pythonJobId = data.job_id;
+    if (!pythonJobId) throw new Error("Pipeline did not return job_id.");
+    setStatus(id, { python_job_id: pythonJobId });
+  } catch (err) {
+    throw new Error(`Could not submit job to pipeline: ${err.message}`);
+  }
+
+  // 2) Poll the pipeline until terminal status or timeout
+  const deadline = Date.now() + JOB_TIMEOUT_MS;
+  let consecutiveErrors = 0;
+
+  while (Date.now() < deadline) {
+    await sleep(POLL_INTERVAL_MS);
+    let payload;
+    try {
+      const resp = await fetch(
+        `${PYTHON_SERVICE_URL}/api/v1/jobs/${pythonJobId}`,
+        { headers: authHeaders() }
+      );
+      if (!resp.ok) {
+        consecutiveErrors++;
+        if (consecutiveErrors > 20) {
+          throw new Error(
+            `Pipeline unreachable: ${resp.status} for ${consecutiveErrors} consecutive polls`
+          );
+        }
+        continue;
+      }
+      payload = await resp.json();
+      consecutiveErrors = 0;
+    } catch (err) {
+      consecutiveErrors++;
+      if (consecutiveErrors > 20) {
+        throw new Error(`Pipeline unreachable: ${err.message}`);
+      }
+      continue;
+    }
+
+    if (payload.status === "completed") {
+      const outputFilename = payload.output_filename;
+      if (!outputFilename) {
+        throw new Error(
+          "Pipeline marked job completed but did not return output_filename."
+        );
+      }
+      const absPath = path.join(OUTPUT_DIR, outputFilename);
+      setStatus(id, {
+        status: "finished",
+        output_filename: outputFilename,
+        output_path: absPath,
+        finished_at: new Date().toISOString(),
       });
       return;
     }
 
-    const child = spawn(PYTHON_BIN, [PYTHON_SCRIPT, job.url, outputPath], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
-    child.on("error", (err) => reject(err));
-    child.on("close", (code) => {
-      if (code === 0 && fs.existsSync(outputPath)) {
-        setStatus(id, {
-          status: "finished",
-          output_path: outputPath,
-          finished_at: new Date().toISOString(),
-        });
-        resolve();
-      } else {
-        reject(new Error(stderr.trim() || `Python script exited with code ${code}`));
-      }
-    });
-  });
+    if (payload.status === "failed") {
+      throw new Error(payload.error || "Pipeline failed without a message.");
+    }
+    // status is "queued" or "running" — keep polling
+  }
+
+  throw new Error(
+    `Job timed out after ${Math.round(JOB_TIMEOUT_MS / 60000)} minutes without completing.`
+  );
 }
 
 // On startup, requeue any jobs left in queued/started state so a crash
 // doesn't leave them stuck forever.
 function recoverPending() {
   const rows = db
-    .prepare("SELECT id FROM jobs WHERE status IN ('queued','started') ORDER BY created_at ASC")
+    .prepare(
+      "SELECT id FROM jobs WHERE status IN ('queued','started') ORDER BY created_at ASC"
+    )
     .all();
   for (const row of rows) {
     db.prepare("UPDATE jobs SET status = 'queued' WHERE id = ?").run(row.id);
