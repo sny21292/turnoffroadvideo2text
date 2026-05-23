@@ -1,0 +1,54 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Pipeline scratch + generated deliverables (keep folder via .gitkeep)
+api_jobs/*
+!api_jobs/.gitkeep
+output/*
+!output/.gitkeep
+deliverables/*
+!deliverables/.gitkeep
+
+# Local test / CLI run folders
+output*/
+
+# Logs
+*.log
+logs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp
+_empty_tmp/
+*.tmp
+~$*.docx

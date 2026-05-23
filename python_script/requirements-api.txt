@@ -1,0 +1,2 @@
+# Deprecated — use requirements.txt for pipeline + API (single install).
+-r requirements.txt
