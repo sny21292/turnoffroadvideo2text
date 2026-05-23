@@ -48,7 +48,7 @@ Sunil stores **`output_filename`** + **`youtube_url`** in SQL. He does not need 
 ```powershell
 pip install -r requirements.txt
 cp .env.example .env   # fill keys
-uvicorn api_server:app --host 0.0.0.0 --port 8000
+uvicorn api_server:app --host 127.0.0.1 --port 4000
 ```
 
 ---
