@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const db = require("./db");
 const { authMiddleware } = require("./auth");
-const { enqueue } = require("./queue");
+const { enqueue, OUTPUT_DIR } = require("./queue");
 
 const router = express.Router();
 
@@ -55,16 +55,36 @@ router.get("/:id/download", authMiddleware, (req, res) => {
     .prepare("SELECT * FROM jobs WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!job) return res.status(404).json({ error: "Job not found." });
-  if (job.status !== "finished" || !job.output_path) {
+  if (job.status !== "finished") {
     return res.status(409).json({ error: "Job is not ready yet." });
   }
-  if (!fs.existsSync(job.output_path)) {
+
+  // New flow: pipeline writes <videoId>.docx into OUTPUT_DIR and records the basename
+  // in output_filename. Old jobs (pre-pipeline) used output_path absolute and .pdf.
+  let filePath, downloadName, contentType;
+  if (job.output_filename) {
+    filePath = path.join(OUTPUT_DIR, job.output_filename);
+    downloadName = job.output_filename;
+    contentType =
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  } else if (job.output_path) {
+    filePath = job.output_path;
+    downloadName = `installation-guide-${job.id.slice(0, 8)}.pdf`;
+    contentType = "application/pdf";
+  } else {
+    return res.status(410).json({ error: "Output file path is missing." });
+  }
+
+  if (!fs.existsSync(filePath)) {
     return res.status(410).json({ error: "Output file is no longer available." });
   }
-  const filename = `installation-guide-${job.id.slice(0, 8)}.pdf`;
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  fs.createReadStream(job.output_path).pipe(res);
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${downloadName}"`
+  );
+  fs.createReadStream(filePath).pipe(res);
 });
 
 router.delete("/:id", authMiddleware, (req, res) => {
@@ -72,8 +92,16 @@ router.delete("/:id", authMiddleware, (req, res) => {
     .prepare("SELECT * FROM jobs WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!job) return res.status(404).json({ error: "Job not found." });
-  if (job.output_path && fs.existsSync(job.output_path)) {
-    try { fs.unlinkSync(job.output_path); } catch { /* ignore */ }
+
+  // Resolve the on-disk file the same way the download endpoint does.
+  let filePath;
+  if (job.output_filename) {
+    filePath = path.join(OUTPUT_DIR, job.output_filename);
+  } else if (job.output_path) {
+    filePath = job.output_path;
+  }
+  if (filePath && fs.existsSync(filePath)) {
+    try { fs.unlinkSync(filePath); } catch { /* ignore */ }
   }
   db.prepare("DELETE FROM jobs WHERE id = ?").run(job.id);
   res.json({ ok: true });
