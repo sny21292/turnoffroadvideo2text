@@ -31,6 +31,7 @@ import logging
 import math
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -41,7 +42,18 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-load_dotenv()
+APP_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_app_path(raw: str) -> str:
+    """Resolve relative paths against this package dir (stable under pm2/systemd)."""
+    if not raw:
+        return raw
+    p = Path(raw)
+    return str(p.resolve()) if p.is_absolute() else str((APP_ROOT / p).resolve())
+
+
+load_dotenv(APP_ROOT / ".env")
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -153,7 +165,7 @@ def _openai_client() -> Any:
 
 # v12: Logo path. ONLY this env var is used — no directory scanning.
 # Falls back to generated placeholder if unset or file fails to load.
-LOGO_PATH = os.getenv("LOGO_PATH", "")
+LOGO_PATH = _resolve_app_path(os.getenv("LOGO_PATH", ""))
 
 # v12: Single consistent width for both real logos and placeholders.
 LOGO_WIDTH_INCHES = float(os.getenv("LOGO_WIDTH_INCHES", "2.5"))
@@ -269,6 +281,14 @@ YT_DLP_FRAGMENT_RETRIES = int(os.getenv("YT_DLP_FRAGMENT_RETRIES", "10"))
 YT_DLP_SOCKET_TIMEOUT = int(os.getenv("YT_DLP_SOCKET_TIMEOUT", "30"))
 # Try smaller 720p downloads before 1080p (~half the bytes on many install videos).
 YT_DLP_PREFER_720_FIRST = os.getenv("YT_DLP_PREFER_720_FIRST", "true").lower() == "true"
+# YouTube auth on datacenter IPs — cookies file is the primary fix (see DEPLOY.md).
+YT_DLP_BIN = os.getenv("YT_DLP_BIN", "yt-dlp").strip() or "yt-dlp"
+YT_DLP_COOKIES_FILE = os.getenv("YT_DLP_COOKIES_FILE", "").strip()
+YT_DLP_PROXY = os.getenv("YT_DLP_PROXY", "").strip()
+YT_DLP_REMOTE_COMPONENTS = os.getenv("YT_DLP_REMOTE_COMPONENTS", "").strip()
+YT_DLP_PLAYER_CLIENT = os.getenv("YT_DLP_PLAYER_CLIENT", "").strip()
+YT_DLP_EXTRACTOR_ARGS = os.getenv("YT_DLP_EXTRACTOR_ARGS", "").strip()
+YT_DLP_EXTRA_ARGS = os.getenv("YT_DLP_EXTRA_ARGS", "").strip()
 
 # ── Rescue pass ──────────────────────────────
 WIDE_RESCUE_PRE_ROLL = float(os.getenv("WIDE_RESCUE_PRE_ROLL", "20.0"))
@@ -334,7 +354,7 @@ DOC_HEADER_LOGO_MAX_HEIGHT_INCHES = float(os.getenv("DOC_HEADER_LOGO_MAX_HEIGHT_
 DOC_CONTENT_WIDTH_INCHES = float(os.getenv("DOC_CONTENT_WIDTH_INCHES", "6.5"))
 
 # Server deliverable: copy final .docx here for the web app / email worker (optional).
-DELIVERABLE_OUTPUT_DIR = os.getenv("DELIVERABLE_OUTPUT_DIR", "").strip()
+DELIVERABLE_OUTPUT_DIR = _resolve_app_path(os.getenv("DELIVERABLE_OUTPUT_DIR", "").strip())
 # slug = Title_slug_videoId.docx (default) | video_id = videoId.docx only (Sunil contract)
 DELIVERABLE_FILENAME_STYLE = os.getenv("DELIVERABLE_FILENAME_STYLE", "slug").strip().lower()
 
@@ -894,39 +914,101 @@ def validate_config() -> None:
             CLAUDE_MODEL, OPENAI_TRANSCRIBE_MODEL, OPENAI_VISION_MODEL,
         )
 
+    yt_status = yt_dlp_config_status()
+    if yt_status["cookies_file"]:
+        if yt_status["cookies_loaded"]:
+            logger.info("yt-dlp cookies: %s", yt_status["cookies_file"])
+        else:
+            logger.warning(
+                "YT_DLP_COOKIES_FILE is set but missing/empty: %s",
+                yt_status["cookies_file"],
+            )
+    elif yt_status["proxy_configured"]:
+        logger.info("yt-dlp proxy configured (no cookies file).")
+    else:
+        logger.warning(
+            "No YT_DLP_COOKIES_FILE or YT_DLP_PROXY set — YouTube may block datacenter IPs."
+        )
+
 
 # ─────────────────────────────────────────────
 # VIDEO DOWNLOAD / NORMALIZE
 # ─────────────────────────────────────────────
 
-def _yt_dlp_auth_args() -> list[str]:
-    """
-    Production-only auth flags appended to every yt-dlp call.
-    Both env vars default to empty (dev laptops on residential IPs need nothing).
-    On the droplet we set:
-      YT_DLP_COOKIES_FILE=/etc/yt-dlp/cookies.txt   bypasses YouTube bot-detection
-                                                    on datacenter IPs by reusing a
-                                                    logged-in browser session.
-      YT_DLP_REMOTE_COMPONENTS=ejs:github           auto-downloads the EJS challenge
-                                                    solver scripts from yt-dlp's
-                                                    official release artifacts; needed
-                                                    by the n-sig JS challenge that
-                                                    YouTube's newer player emits.
-    """
+def _yt_dlp_cookies_path() -> Optional[Path]:
+    if not YT_DLP_COOKIES_FILE:
+        return None
+    p = Path(YT_DLP_COOKIES_FILE)
+    if not p.is_absolute():
+        p = Path(_resolve_app_path(YT_DLP_COOKIES_FILE))
+    return p
+
+
+def _is_youtube_bot_error(exc_or_text: str | Exception) -> bool:
+    text = str(exc_or_text).lower()
+    return any(
+        marker in text
+        for marker in (
+            "sign in to confirm",
+            "confirm you're not a bot",
+            "not a bot",
+            "cookies-from-browser",
+            "http error 403",
+            "unable to extract uploader id",
+            "this content isn't available",
+            "bot",
+        )
+    )
+
+
+def yt_dlp_config_status() -> dict[str, Any]:
+    """Summarize yt-dlp auth settings for /health (no secrets)."""
+    cookie_path = _yt_dlp_cookies_path()
+    cookie_ok = bool(cookie_path and cookie_path.is_file() and cookie_path.stat().st_size > 0)
+    return {
+        "bin": YT_DLP_BIN,
+        "cookies_file": str(cookie_path) if cookie_path else None,
+        "cookies_loaded": cookie_ok,
+        "proxy_configured": bool(YT_DLP_PROXY),
+        "remote_components": YT_DLP_REMOTE_COMPONENTS or None,
+        "player_client": YT_DLP_PLAYER_CLIENT or None,
+    }
+
+
+def _yt_dlp_auth_args(*, player_client: Optional[str] = None) -> list[str]:
+    """Cookies, proxy, EJS solver, and player-client overrides for YouTube bot checks."""
     args: list[str] = []
-    cookies_file = os.getenv("YT_DLP_COOKIES_FILE", "").strip()
-    if cookies_file:
-        args.extend(["--cookies", cookies_file])
-    remote_components = os.getenv("YT_DLP_REMOTE_COMPONENTS", "").strip()
-    if remote_components:
-        args.extend(["--remote-components", remote_components])
+
+    cookie_path = _yt_dlp_cookies_path()
+    if cookie_path:
+        if cookie_path.is_file():
+            args.extend(["--cookies", str(cookie_path)])
+        else:
+            logger.warning("YT_DLP_COOKIES_FILE not found: %s", cookie_path)
+
+    if YT_DLP_PROXY:
+        args.extend(["--proxy", YT_DLP_PROXY])
+
+    if YT_DLP_REMOTE_COMPONENTS:
+        args.extend(["--remote-components", YT_DLP_REMOTE_COMPONENTS])
+
+    clients = (player_client or YT_DLP_PLAYER_CLIENT).strip()
+    if clients:
+        args.extend(["--extractor-args", f"youtube:player_client={clients}"])
+
+    if YT_DLP_EXTRACTOR_ARGS:
+        args.extend(["--extractor-args", YT_DLP_EXTRACTOR_ARGS])
+
+    if YT_DLP_EXTRA_ARGS:
+        args.extend(shlex.split(YT_DLP_EXTRA_ARGS, posix=os.name != "nt"))
+
     return args
 
 
-def _yt_dlp_base_cmd() -> list[str]:
+def _yt_dlp_base_cmd(*, player_client: Optional[str] = None) -> list[str]:
     """Shared yt-dlp flags for downloads (resume-friendly, more retries on flaky links)."""
     return [
-        "yt-dlp",
+        YT_DLP_BIN,
         "--no-check-certificates",
         "--no-playlist",
         "--retries", str(YT_DLP_RETRIES),
@@ -935,7 +1017,7 @@ def _yt_dlp_base_cmd() -> list[str]:
         "--continue",
         "--write-info-json",
         "--merge-output-format", "mp4",
-        *_yt_dlp_auth_args(),
+        *_yt_dlp_auth_args(player_client=player_client),
     ]
 
 
@@ -993,79 +1075,103 @@ async def download_video(url: str, output_dir: Path) -> Path:
     format_chain = _yt_dlp_format_chain()
     last_error: Optional[Exception] = None
 
-    for fmt in format_chain:
-        try:
-            logger.info("Trying format: %s", fmt[:80])
-            await run_cmd(
-                _yt_dlp_base_cmd() + ["-f", fmt, "-o", str(output_template), url],
-                step_label="yt-dlp", retries=1,
-            )
+    player_client_attempts: list[Optional[str]] = [None]
+    seen_clients: set[str] = set()
+    if YT_DLP_PLAYER_CLIENT:
+        for client in [c.strip() for c in YT_DLP_PLAYER_CLIENT.split(",") if c.strip()]:
+            if client not in seen_clients:
+                seen_clients.add(client)
+                player_client_attempts.append(client)
+    for client in ("mweb", "android", "web"):
+        if client not in seen_clients:
+            player_client_attempts.append(client)
 
-            candidates = [
-                p for p in output_dir.glob("video.*")
-                if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
-                and not p.name.endswith(".part")
-                and p.stat().st_size > 0
-            ]
+    for player_client in player_client_attempts:
+        if player_client:
+            logger.info("yt-dlp player client attempt: %s", player_client)
 
-            if not candidates:
-                raise FileNotFoundError("yt-dlp completed but no video file was found.")
+        for fmt in format_chain:
+            try:
+                logger.info("Trying format: %s", fmt[:80])
+                await run_cmd(
+                    _yt_dlp_base_cmd(player_client=player_client)
+                    + ["-f", fmt, "-o", str(output_template), url],
+                    step_label="yt-dlp", retries=1,
+                )
 
-            downloaded = max(candidates, key=lambda p: p.stat().st_size)
+                candidates = [
+                    p for p in output_dir.glob("video.*")
+                    if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+                    and not p.name.endswith(".part")
+                    and p.stat().st_size > 0
+                ]
 
-            if downloaded.resolve() == final_path.resolve():
+                if not candidates:
+                    raise FileNotFoundError("yt-dlp completed but no video file was found.")
+
+                downloaded = max(candidates, key=lambda p: p.stat().st_size)
+
+                if downloaded.resolve() == final_path.resolve():
+                    logger.info(
+                        "Downloaded → %s (%.1f MB)",
+                        final_path.name, final_path.stat().st_size / 1_048_576,
+                    )
+                    return final_path
+
+                logger.info("Remuxing %s → %s", downloaded.name, final_path.name)
+                try:
+                    await run_cmd(
+                        [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-y", "-i", str(downloaded), "-c", "copy", str(final_path),
+                        ],
+                        step_label="ffmpeg-remux",
+                    )
+                except subprocess.CalledProcessError:
+                    logger.warning("Remux failed. Re-encoding to H.264.")
+                    await run_cmd(
+                        [
+                            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                            "-i", str(downloaded),
+                            "-vf", f"scale={H264_PROCESSING_WIDTH}:-2",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                            "-g", "15", "-keyint_min", "15", "-sc_threshold", "0",
+                            "-c:a", "aac", "-b:a", "128k", str(final_path),
+                        ],
+                        step_label="ffmpeg-transcode", timeout=900,
+                    )
+
+                if not final_path.exists() or final_path.stat().st_size == 0:
+                    raise FileNotFoundError(f"Normalized file missing: {final_path}")
+
                 logger.info(
                     "Downloaded → %s (%.1f MB)",
                     final_path.name, final_path.stat().st_size / 1_048_576,
                 )
                 return final_path
 
-            logger.info("Remuxing %s → %s", downloaded.name, final_path.name)
-            try:
-                await run_cmd(
-                    [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
-                        "-y", "-i", str(downloaded), "-c", "copy", str(final_path),
-                    ],
-                    step_label="ffmpeg-remux",
-                )
-            except subprocess.CalledProcessError:
-                logger.warning("Remux failed. Re-encoding to H.264.")
-                await run_cmd(
-                    [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                        "-i", str(downloaded),
-                        "-vf", f"scale={H264_PROCESSING_WIDTH}:-2",
-                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                        "-g", "15", "-keyint_min", "15", "-sc_threshold", "0",
-                        "-c:a", "aac", "-b:a", "128k", str(final_path),
-                    ],
-                    step_label="ffmpeg-transcode", timeout=900,
-                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Format failed: %s", exc)
+                if not _is_youtube_bot_error(exc):
+                    break
 
-            if not final_path.exists() or final_path.stat().st_size == 0:
-                raise FileNotFoundError(f"Normalized file missing: {final_path}")
-
-            logger.info(
-                "Downloaded → %s (%.1f MB)",
-                final_path.name, final_path.stat().st_size / 1_048_576,
-            )
-            return final_path
-
-        except Exception as exc:
-            last_error = exc
-            logger.warning("Format failed: %s", exc)
+    bot_hint = ""
+    if last_error and _is_youtube_bot_error(last_error):
+        bot_hint = (
+            "\nYouTube blocked this server IP (bot check). Fix:\n"
+            "  1) Export fresh browser cookies to YT_DLP_COOKIES_FILE (Netscape format).\n"
+            "  2) Set YT_DLP_REMOTE_COMPONENTS=ejs:github and ensure deno is installed.\n"
+            "  3) Optional fallback: YT_DLP_PROXY with a residential proxy URL.\n"
+            "See python_script/DEPLOY.md → YouTube auth on the droplet.\n"
+        )
 
     raise RuntimeError(
-        f"All yt-dlp attempts failed. Last error: {last_error}\n\n"
-        "Your connection is dropping while downloading a large file (~500+ MB at 1080p).\n"
-        "Try one of these:\n"
-        "  1) Download outside the pipeline, then rerun with --video-file:\n"
-        "       yt-dlp -f \"best[height<=720]\" -o demo2-2\\video.mp4 \"URL\"\n"
-        "       python youtube_to_word_pipeline.py \"URL\" demo2-2 --video-file demo2-2\\video.mp4\n"
+        f"All yt-dlp attempts failed. Last error: {last_error}{bot_hint}\n"
+        "Other tips:\n"
+        "  1) Download outside the pipeline, then rerun with --video-file.\n"
         "  2) Do NOT use --fresh if a partial download exists (yt-dlp can resume).\n"
-        "  3) Use wired internet / disable VPN; pip install -U yt-dlp\n"
-        "  4) Set YT_DLP_PREFER_720_FIRST=true (default) for smaller files."
+        "  3) pip install -U yt-dlp; set YT_DLP_PREFER_720_FIRST=true (default)."
     )
 
 
@@ -1151,12 +1257,7 @@ async def get_video_title(url: str, output_dir: Optional[Path] = None) -> str:
             return t
     try:
         result = await run_cmd(
-            [
-                "yt-dlp", "--no-check-certificates", "--no-playlist",
-                "--retries", "2", "--fragment-retries", "2",
-                *_yt_dlp_auth_args(),
-                "--get-title", url,
-            ],
+            _yt_dlp_base_cmd() + ["--get-title", url],
             step_label="yt-title", retries=1, timeout=YT_DLP_TITLE_TIMEOUT_SEC,
         )
         title = result.stdout.strip()

@@ -35,17 +35,28 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, HttpUrl
 
-load_dotenv()
+APP_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_app_path(raw: str) -> Path:
+    """Resolve relative paths against this package dir (stable under pm2/systemd)."""
+    p = Path(raw)
+    return p.resolve() if p.is_absolute() else (APP_ROOT / p).resolve()
+
+
+load_dotenv(APP_ROOT / ".env")
 
 from youtube_to_word_pipeline import (  # noqa: E402
+    DELIVERABLE_OUTPUT_DIR,
     PipelinePromptOverrides,
     run_full_pipeline,
+    yt_dlp_config_status,
 )
 
 logger = logging.getLogger("yt_api")
 
 API_KEY = os.getenv("API_KEY", "").strip()
-API_JOBS_DIR = Path(os.getenv("API_JOBS_DIR", "api_jobs"))
+API_JOBS_DIR = _resolve_app_path(os.getenv("API_JOBS_DIR", "api_jobs"))
 API_MAX_CONCURRENT_JOBS = int(os.getenv("API_MAX_CONCURRENT_JOBS", "1"))
 API_CLEANUP_WORKSPACE_ON_SUCCESS = (
     os.getenv("API_CLEANUP_WORKSPACE_ON_SUCCESS", "true").lower() == "true"
@@ -141,6 +152,8 @@ class JobRecord(BaseModel):
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     API_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    if DELIVERABLE_OUTPUT_DIR:
+        Path(DELIVERABLE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     pruned = await asyncio.to_thread(_prune_old_job_dirs)
     if pruned:
         logger.info("Pruned %d old job folder(s) from %s", pruned, API_JOBS_DIR)
@@ -209,6 +222,14 @@ def _humanize_error(raw: str) -> str:
     text = (raw or "Unknown error").strip()
     lower = text.lower()
     if "yt-dlp" in lower or ("download" in lower and "failed" in lower):
+        if any(
+            marker in lower
+            for marker in ("not a bot", "sign in to confirm", "bot check", "http error 403")
+        ):
+            return (
+                "YouTube blocked the download from this server. "
+                "Refresh YT_DLP_COOKIES_FILE or configure a residential proxy."
+            )
         return "Could not download video. Check the YouTube URL and network connection."
     if "no transcript" in lower or "no speech" in lower:
         return "No usable speech found in the video audio."
@@ -541,8 +562,10 @@ async def health() -> dict[str, Any]:
     jobs_bytes = _dir_size_bytes(API_JOBS_DIR) if API_JOBS_DIR.exists() else 0
     return {
         "ok": True,
+        "app_root": str(APP_ROOT),
         "active_job": _active_job_id,
         "max_concurrent_jobs": API_MAX_CONCURRENT_JOBS,
+        "deliverable_output_dir": DELIVERABLE_OUTPUT_DIR or None,
         "jobs_dir": str(API_JOBS_DIR.resolve()),
         "api_jobs_size_mb": round(jobs_bytes / 1_048_576, 2),
         "delete_job_dir_on_success": API_DELETE_JOB_DIR_ON_SUCCESS,
@@ -551,6 +574,7 @@ async def health() -> dict[str, Any]:
         "cleanup_on_failure": API_CLEANUP_WORKSPACE_ON_FAILURE,
         "prune_old_jobs_days": API_PRUNE_OLD_JOBS_DAYS,
         "job_archive_dir": str(API_JOB_ARCHIVE_DIR.resolve()),
+        "yt_dlp": yt_dlp_config_status(),
     }
 
 
