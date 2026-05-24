@@ -152,8 +152,8 @@ export default function HistoryPage() {
             History
           </h1>
           <p className="mt-2 text-on-surface-variant max-w-xl">
-            Every YouTube link you&apos;ve submitted, ready to download as a PDF
-            whenever you need it again.
+            Every YouTube link you&apos;ve submitted, ready to download as a
+            Word document whenever you need it again.
           </p>
         </div>
         <Link
@@ -303,7 +303,7 @@ function JobRow({
             onClick={onDownload}
             className="bg-primary text-on-primary px-4 py-2 rounded-xl text-sm font-semibold hover:shadow-[0_0_20px_rgba(163,0,1,0.5)] active:scale-[0.98] transition-all disabled:opacity-60"
           >
-            {busy ? "Downloading…" : "Download PDF"}
+            {busy ? "Downloading…" : "Download .docx"}
           </button>
         ) : null}
         <button

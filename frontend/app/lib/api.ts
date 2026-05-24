@@ -121,6 +121,15 @@ export function downloadUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  // Match: filename="something.docx" OR filename=something.docx (with optional UTF-8 form)
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) return decodeURIComponent(utf8[1].trim());
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : null;
+}
+
 export async function downloadJob(job: JobResponse): Promise<void> {
   if (!job.download_url) throw new Error("Job is not ready yet.");
   const token = getToken();
@@ -131,11 +140,15 @@ export async function downloadJob(job: JobResponse): Promise<void> {
     if (res.status === 401) clearSession();
     throw new Error(await parseError(res));
   }
+  // Prefer the server's Content-Disposition filename so we always serve the
+  // correct extension (.docx for new jobs, .pdf for legacy ones). Fall back to
+  // a sensible default if the header is missing.
+  const serverName = filenameFromContentDisposition(res.headers.get("Content-Disposition"));
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
-  a.download = `installation-guide-${job.job_id.slice(0, 8)}.pdf`;
+  a.download = serverName || `installation-guide-${job.job_id.slice(0, 8)}.docx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -51,13 +51,13 @@ export function AuthShell({
             </h2>
             <p className="mt-4 text-white/85 max-w-md">
               Drop a YouTube link — our AI watches it, captures the right
-              frames, and writes a clean, branded PDF for your team.
+              frames, and writes a clean, branded Word document for your team.
             </p>
           </div>
 
           <ul className="relative space-y-3 mt-10">
             {[
-              "Step-by-step PDFs with screenshots",
+              "Step-by-step Word docs with screenshots",
               "Personal history of every video you've processed",
               "Re-download any guide whenever you need it",
             ].map((line) => (
