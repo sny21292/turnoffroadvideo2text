@@ -21,7 +21,10 @@ export type JobResponse = {
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  extra_instruction: string | null;
 };
+
+export const EXTRA_INSTRUCTION_MAX_LEN = 500;
 
 const TOKEN_KEY = "v2t.token";
 const USER_KEY = "v2t.user";
@@ -97,10 +100,16 @@ export function logout() {
   clearSession();
 }
 
-export async function submitJob(url: string): Promise<JobResponse> {
+export async function submitJob(
+  url: string,
+  extraInstruction?: string | null
+): Promise<JobResponse> {
+  const body: { url: string; extra_instruction?: string } = { url };
+  const trimmed = (extraInstruction ?? "").trim();
+  if (trimmed) body.extra_instruction = trimmed;
   return apiFetch<JobResponse>("/jobs", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(body),
   });
 }
 

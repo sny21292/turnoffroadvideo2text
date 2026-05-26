@@ -65,7 +65,7 @@ turnoffroadvideo2text/
         │
         ▼
 [Next.js frontend]
-  POST /api/jobs  { url }   (with Authorization: Bearer <jwt>)
+  POST /api/jobs  { url, extra_instruction? }   (with Authorization: Bearer <jwt>)
         │
         ▼
 [Express backend, port 8000]
@@ -78,7 +78,9 @@ turnoffroadvideo2text/
 [Backend queue.js — STRICTLY SERIAL]
   Picks up the job
   UPDATE jobs SET status='started'
-  POST http://127.0.0.1:4000/api/v1/jobs  { youtube_url }
+  POST http://127.0.0.1:4000/api/v1/jobs  { youtube_url, extra_instruction? }
+  (extra_instruction is merged into the Python service's step + tools
+   Claude prompts so the same nudge influences both stages 4 and 6)
         │
         ▼
 [Python FastAPI, port 4000]
@@ -121,7 +123,7 @@ turnoffroadvideo2text/
 |---|---|---|---|
 | POST | `/api/auth/login` | `{ email, password }` | `{ token, user }` (7-day JWT) |
 | GET | `/api/auth/me` | — | `{ user }` |
-| POST | `/api/jobs` | `{ url }` | `202 { job_id, status: 'queued', … }` |
+| POST | `/api/jobs` | `{ url, extra_instruction? }` | `202 { job_id, status: 'queued', extra_instruction, … }` |
 | GET | `/api/jobs` | — | `{ jobs: [...] }` — caller's jobs only |
 | GET | `/api/jobs/:id` | — | `{ job }` |
 | GET | `/api/jobs/:id/download` | — | `application/vnd...wordprocessingml.document` stream |
@@ -155,6 +157,7 @@ CREATE TABLE jobs (
   output_path     TEXT,                           -- legacy (pre-pipeline jobs); .pdf
   output_filename TEXT,                           -- new: basename in /var/data/.../output
   python_job_id   TEXT,                           -- UUID returned by python service
+  extra_instruction TEXT,                         -- optional per-job nudge from submit form (≤500 chars)
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   finished_at     TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

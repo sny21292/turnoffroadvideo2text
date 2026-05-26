@@ -125,6 +125,14 @@ class CreateJobRequest(BaseModel):
         description="Optional document title override.",
     )
     prompt_tweaks: Optional[PromptTweaks] = None
+    # Convenience: simple per-job tweak from the Node backend (one textarea on
+    # the submit form). Gets merged into prompt_tweaks.step_instructions AND
+    # tools_instructions so it nudges both Claude stages.
+    extra_instruction: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Per-job free-text nudge appended to step + tools Claude prompts.",
+    )
     skip_dedup: bool = False
 
 
@@ -602,6 +610,29 @@ async def get_job_sunil(
     return _sunil_status_response(_load_job(job_id))
 
 
+def _merge_extra_instruction(
+    tweaks: Optional[PromptTweaks], extra: Optional[str]
+) -> Optional[PromptTweaks]:
+    """If extra is non-empty, append it to step + tools instructions on tweaks."""
+    if not extra:
+        return tweaks
+    extra = extra.strip()
+    if not extra:
+        return tweaks
+
+    def merge(existing: str) -> str:
+        return f"{existing}\n\n{extra}".strip() if existing else extra
+
+    if tweaks is None:
+        return PromptTweaks(step_instructions=extra, tools_instructions=extra)
+    return tweaks.model_copy(
+        update={
+            "step_instructions": merge(tweaks.step_instructions),
+            "tools_instructions": merge(tweaks.tools_instructions),
+        }
+    )
+
+
 @app.post("/api/v1/jobs", response_model=JobRecord, status_code=202)
 async def create_job(
     body: CreateJobRequest,
@@ -610,12 +641,15 @@ async def create_job(
 ) -> JobRecord:
     """
     Extended API (dev): prompt tweaks + skip_dedup. Poll GET /api/v1/jobs/{job_id}.
+    Also accepts `extra_instruction` (simple per-job nudge from the Node backend)
+    which is merged into step_instructions + tools_instructions.
     """
+    tweaks = _merge_extra_instruction(body.prompt_tweaks, body.extra_instruction)
     job_id = _queue_job(
         youtube_url=str(body.youtube_url),
         background_tasks=background_tasks,
         title=body.title,
-        prompt_tweaks=body.prompt_tweaks,
+        prompt_tweaks=tweaks,
         skip_dedup=body.skip_dedup,
     )
     return _load_job(job_id)

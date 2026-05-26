@@ -84,7 +84,8 @@ export default function HistoryPage() {
       (j) =>
         j.url.toLowerCase().includes(q) ||
         j.job_id.toLowerCase().includes(q) ||
-        j.status.toLowerCase().includes(q)
+        j.status.toLowerCase().includes(q) ||
+        (j.extra_instruction ?? "").toLowerCase().includes(q)
     );
   }, [jobs, query]);
 
@@ -293,6 +294,17 @@ function JobRow({
             <span className="ml-2 text-error">· {job.error}</span>
           ) : null}
         </div>
+        {job.extra_instruction ? (
+          <div
+            className="mt-1.5 text-xs italic text-on-surface-variant flex items-start gap-1"
+            title={job.extra_instruction}
+          >
+            <span aria-hidden className="select-none">💬</span>
+            <span className="line-clamp-2 break-words">
+              &ldquo;{job.extra_instruction}&rdquo;
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2 md:flex-shrink-0">

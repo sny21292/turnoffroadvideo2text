@@ -43,5 +43,8 @@ if (!jobsColumns.has("python_job_id")) {
 if (!jobsColumns.has("output_filename")) {
   db.exec("ALTER TABLE jobs ADD COLUMN output_filename TEXT");
 }
+if (!jobsColumns.has("extra_instruction")) {
+  db.exec("ALTER TABLE jobs ADD COLUMN extra_instruction TEXT");
+}
 
 module.exports = db;

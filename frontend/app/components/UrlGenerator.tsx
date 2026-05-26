@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
+  EXTRA_INSTRUCTION_MAX_LEN,
   JobResponse,
   RqStatus,
   downloadJob,
@@ -35,6 +36,7 @@ export function UrlGenerator() {
   const router = useRouter();
   const { user, ready } = useAuth();
   const [url, setUrl] = useState("");
+  const [extraInstruction, setExtraInstruction] = useState("");
   const [state, setState] = useState<UiState>({ kind: "idle" });
   const [downloading, setDownloading] = useState(false);
   const pollRef = useRef<number | null>(null);
@@ -51,6 +53,7 @@ export function UrlGenerator() {
   function reset() {
     stopPolling();
     setUrl("");
+    setExtraInstruction("");
     setState({ kind: "idle" });
   }
 
@@ -64,7 +67,7 @@ export function UrlGenerator() {
     }
     setState({ kind: "submitting" });
     try {
-      const job = await submitJob(url.trim());
+      const job = await submitJob(url.trim(), extraInstruction);
       setState({ kind: "polling", job });
       startPolling(job.job_id);
     } catch (err) {
@@ -124,37 +127,63 @@ export function UrlGenerator() {
     <div className="w-full max-w-3xl glass-card rounded-2xl p-6 md:p-10 ai-glow relative group">
       <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-secondary/20 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000 pointer-events-none" />
 
-      <form
-        onSubmit={handleSubmit}
-        className="relative flex flex-col md:flex-row gap-4"
-      >
-        <div className="flex-grow relative">
-          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-            <PlayCircleIcon className="w-6 h-6 text-on-surface-variant" />
+      <form onSubmit={handleSubmit} className="relative flex flex-col gap-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-grow relative">
+            <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+              <PlayCircleIcon className="w-6 h-6 text-on-surface-variant" />
+            </div>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Paste YouTube video URL..."
+              required
+              disabled={isBusy}
+              className="w-full bg-white border border-black/10 rounded-xl py-4 pl-12 pr-4 text-on-surface focus:ring-2 focus:ring-primary/40 focus:border-primary focus:outline-none transition-all disabled:opacity-60"
+            />
           </div>
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste YouTube video URL..."
-            required
+          <button
+            type="submit"
             disabled={isBusy}
-            className="w-full bg-white border border-black/10 rounded-xl py-4 pl-12 pr-4 text-on-surface focus:ring-2 focus:ring-primary/40 focus:border-primary focus:outline-none transition-all disabled:opacity-60"
-          />
+            className="bg-primary text-on-primary px-8 py-4 rounded-xl font-semibold whitespace-nowrap hover:shadow-[0_0_20px_rgba(163,0,1,0.5)] active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {state.kind === "submitting"
+              ? "Submitting…"
+              : state.kind === "polling"
+              ? "Processing…"
+              : isLoggedOut
+              ? "Log in to Generate"
+              : "Generate Installation Guide"}
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={isBusy}
-          className="bg-primary text-on-primary px-8 py-4 rounded-xl font-semibold whitespace-nowrap hover:shadow-[0_0_20px_rgba(163,0,1,0.5)] active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {state.kind === "submitting"
-            ? "Submitting…"
-            : state.kind === "polling"
-            ? "Processing…"
-            : isLoggedOut
-            ? "Log in to Generate"
-            : "Generate Installation Guide"}
-        </button>
+
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="extra-instruction"
+            className="text-xs font-mono uppercase tracking-widest text-on-surface-variant"
+          >
+            Anything specific to focus on for this video?{" "}
+            <span className="opacity-60 normal-case font-sans tracking-normal">
+              (optional)
+            </span>
+          </label>
+          <textarea
+            id="extra-instruction"
+            value={extraInstruction}
+            onChange={(e) =>
+              setExtraInstruction(e.target.value.slice(0, EXTRA_INSTRUCTION_MAX_LEN))
+            }
+            placeholder="e.g. Skip the unboxing intro; focus on the bracket installation steps."
+            disabled={isBusy}
+            rows={2}
+            maxLength={EXTRA_INSTRUCTION_MAX_LEN}
+            className="w-full bg-white border border-black/10 rounded-xl py-3 px-4 text-sm text-on-surface placeholder:text-on-surface-variant focus:ring-2 focus:ring-primary/40 focus:border-primary focus:outline-none transition-all disabled:opacity-60 resize-none"
+          />
+          <div className="flex justify-end text-xs font-mono text-on-surface-variant">
+            {extraInstruction.length} / {EXTRA_INSTRUCTION_MAX_LEN}
+          </div>
+        </div>
       </form>
 
       {state.kind === "polling" && (

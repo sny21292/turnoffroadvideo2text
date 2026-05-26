@@ -8,6 +8,7 @@ const { enqueue, OUTPUT_DIR } = require("./queue");
 const router = express.Router();
 
 const YT_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/i;
+const MAX_EXTRA_INSTRUCTION_LEN = 500;
 
 function jobToResponse(job) {
   return {
@@ -18,19 +19,35 @@ function jobToResponse(job) {
     download_url: job.status === "finished" ? `/jobs/${job.id}/download` : null,
     created_at: job.created_at,
     finished_at: job.finished_at,
+    extra_instruction: job.extra_instruction ?? null,
   };
 }
 
 router.post("/", authMiddleware, (req, res) => {
-  const { url } = req.body || {};
+  const { url, extra_instruction } = req.body || {};
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "A YouTube URL is required." });
   }
-  const trimmed = url.trim();
-  if (!YT_REGEX.test(trimmed)) {
+  const trimmedUrl = url.trim();
+  if (!YT_REGEX.test(trimmedUrl)) {
     return res.status(400).json({ error: "Please enter a valid YouTube URL." });
   }
-  const id = enqueue(req.user.id, trimmed);
+
+  let extra = null;
+  if (extra_instruction != null) {
+    if (typeof extra_instruction !== "string") {
+      return res.status(400).json({ error: "Extra instruction must be a string." });
+    }
+    const trimmedExtra = extra_instruction.trim();
+    if (trimmedExtra.length > MAX_EXTRA_INSTRUCTION_LEN) {
+      return res.status(400).json({
+        error: `Extra instruction is too long (max ${MAX_EXTRA_INSTRUCTION_LEN} characters).`,
+      });
+    }
+    if (trimmedExtra.length > 0) extra = trimmedExtra;
+  }
+
+  const id = enqueue(req.user.id, trimmedUrl, extra);
   const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id);
   return res.status(202).json(jobToResponse(job));
 });

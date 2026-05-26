@@ -26,11 +26,11 @@ function authHeaders() {
     : {};
 }
 
-function enqueue(userId, url) {
+function enqueue(userId, url, extraInstruction = null) {
   const id = crypto.randomUUID();
   db.prepare(
-    "INSERT INTO jobs (id, user_id, url, status) VALUES (?, ?, ?, 'queued')"
-  ).run(id, userId, url);
+    "INSERT INTO jobs (id, user_id, url, status, extra_instruction) VALUES (?, ?, ?, 'queued', ?)"
+  ).run(id, userId, url, extraInstruction);
   queue.push(id);
   process.nextTick(drain);
   return id;
@@ -75,10 +75,12 @@ async function runJob(id) {
   // 1) Submit job to Python pipeline
   let pythonJobId;
   try {
+    const body = { youtube_url: job.url };
+    if (job.extra_instruction) body.extra_instruction = job.extra_instruction;
     const resp = await fetch(`${PYTHON_SERVICE_URL}/api/v1/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ youtube_url: job.url }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const body = await resp.text();
