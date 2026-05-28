@@ -1,1 +1,4 @@
+# Local SSH / cookie upload outputs (see python_script/.gitignore)
 last_*.txt
+check_out.txt
+*_out.txt
