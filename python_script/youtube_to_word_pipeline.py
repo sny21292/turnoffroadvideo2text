@@ -348,6 +348,7 @@ DOC_STEP_TEXT_WIDTH_INCHES = float(os.getenv("DOC_STEP_TEXT_WIDTH_INCHES", "2.92
 DOC_LEFT_MARGIN_INCHES = float(os.getenv("DOC_LEFT_MARGIN_INCHES", "0.75"))
 DOC_RIGHT_MARGIN_INCHES = float(os.getenv("DOC_RIGHT_MARGIN_INCHES", "0.75"))
 DOC_DARK_THEME = os.getenv("DOC_DARK_THEME", "true").lower() == "true"
+DOC_SHOW_STEP_TIMESTAMPS = os.getenv("DOC_SHOW_STEP_TIMESTAMPS", "true").lower() == "true"
 DOC_ACCENT_COLOR = os.getenv("DOC_ACCENT_COLOR", "E8634B").strip().lstrip("#")
 DOC_HEADER_LOGO_MAX_WIDTH_INCHES = float(os.getenv("DOC_HEADER_LOGO_MAX_WIDTH_INCHES", "2.75"))
 DOC_HEADER_LOGO_MAX_HEIGHT_INCHES = float(os.getenv("DOC_HEADER_LOGO_MAX_HEIGHT_INCHES", "0.72"))
@@ -841,6 +842,75 @@ def normalize_youtube_url(url: str) -> str:
             logger.info("Normalized YouTube URL (dropped playlist params): %s", clean)
         return clean
     return raw
+
+
+def format_video_timestamp(seconds: float) -> str:
+    """Human-readable timestamp for Word docs (M:SS or H:MM:SS)."""
+    total = max(0, int(round(float(seconds))))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def step_video_timestamp_seconds(step: InstallationStep) -> float:
+    """Seconds into the source video for this step's screenshot."""
+    if step.screenshot_timestamp is not None:
+        return float(step.screenshot_timestamp)
+    return float(step.timestamp)
+
+
+def youtube_watch_url_at(video_url: str, seconds: float) -> str:
+    """YouTube watch URL that opens at the given second (for review / re-screenshot)."""
+    base = normalize_youtube_url((video_url or "").strip())
+    if not base:
+        return ""
+    t = max(0, int(round(float(seconds))))
+    joiner = "&" if "?" in base else "?"
+    return f"{base}{joiner}t={t}s"
+
+
+def add_docx_hyperlink(
+    paragraph,
+    text: str,
+    url: str,
+    *,
+    color_hex: str = "0563C1",
+    font_size_pt: int = 9,
+) -> None:
+    """Add a clickable external hyperlink run to a python-docx paragraph."""
+    if not text or not url:
+        return
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    part = paragraph.part
+    r_id = part.relate_to(
+        url,
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        is_external=True,
+    )
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+    new_run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), str(int(font_size_pt * 2)))
+    r_pr.append(sz)
+    u = OxmlElement("w:u")
+    u.set(qn("w:val"), "single")
+    r_pr.append(u)
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), color_hex.lstrip("#"))
+    r_pr.append(color)
+    new_run.append(r_pr)
+    t_elem = OxmlElement("w:t")
+    t_elem.text = text
+    t_elem.set(qn("xml:space"), "preserve")
+    new_run.append(t_elem)
+    hyperlink.append(new_run)
+    paragraph._p.append(hyperlink)
 
 
 def require_tool(name: str) -> None:
@@ -5945,6 +6015,30 @@ def build_word_doc_sync(
         bd.font.size = Pt(10)
         bd.font.color.rgb = _rgbx(_BODY)
 
+        if DOC_SHOW_STEP_TIMESTAMPS:
+            ts_sec = step_video_timestamp_seconds(step)
+            ts_label = format_video_timestamp(ts_sec)
+            ts_p = txt_cell.add_paragraph()
+            ts_p.paragraph_format.space_before = Pt(6)
+            ts_p.paragraph_format.space_after = Pt(0)
+            ts_prefix = ts_p.add_run("Video timestamp: ")
+            ts_prefix.font.size = Pt(9)
+            ts_prefix.font.color.rgb = _rgbx(_MUTED)
+            link_url = youtube_watch_url_at(video_url, ts_sec)
+            if link_url:
+                add_docx_hyperlink(
+                    ts_p,
+                    ts_label,
+                    link_url,
+                    color_hex=_ACCENT,
+                    font_size_pt=9,
+                )
+            else:
+                ts_val = ts_p.add_run(ts_label)
+                ts_val.bold = True
+                ts_val.font.size = Pt(9)
+                ts_val.font.color.rgb = _rgbx(_ACCENT)
+
         ss = step.screenshot_path
         if ss and Path(ss).exists():
             try:
@@ -5956,6 +6050,33 @@ def build_word_doc_sync(
                 ip.paragraph_format.space_before = Pt(4)
                 ip.add_run().add_picture(BytesIO(fig), width=Inches(step_img_w - 0.1))
                 figure_num += 1
+                if DOC_SHOW_STEP_TIMESTAMPS:
+                    ts_sec = step_video_timestamp_seconds(step)
+                    ts_label = format_video_timestamp(ts_sec)
+                    cap_p = img_cell.add_paragraph()
+                    cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cap_p.paragraph_format.space_before = Pt(4)
+                    cap_p.paragraph_format.space_after = Pt(8)
+                    cap_prefix = cap_p.add_run("Screenshot at ")
+                    cap_prefix.font.size = Pt(8)
+                    cap_prefix.font.color.rgb = _rgbx(_MUTED)
+                    link_url = youtube_watch_url_at(video_url, ts_sec)
+                    if link_url:
+                        add_docx_hyperlink(
+                            cap_p,
+                            ts_label,
+                            link_url,
+                            color_hex=_ACCENT,
+                            font_size_pt=8,
+                        )
+                        cap_hint = cap_p.add_run(" — click to open in YouTube")
+                        cap_hint.font.size = Pt(8)
+                        cap_hint.font.color.rgb = _rgbx(_MUTED)
+                    else:
+                        cap_val = cap_p.add_run(ts_label)
+                        cap_val.bold = True
+                        cap_val.font.size = Pt(8)
+                        cap_val.font.color.rgb = _rgbx(_ACCENT)
             except Exception as exc:
                 logger.error("Step %02d image insert failed: %s", step.step_number, exc)
                 _cell_para(img_cell, f"[Photo unavailable: {exc}]", color="CC0000")

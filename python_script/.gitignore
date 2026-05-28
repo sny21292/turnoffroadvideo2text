@@ -2,6 +2,13 @@
 .env
 .env.local
 .env.*.local
+.env.bak*
+*.bak
+
+# YouTube cookies (never commit — upload to server only)
+youtube_cookies.txt
+*cookies*.txt
+cookies.txt
 
 # Python
 __pycache__/
@@ -52,3 +59,8 @@ desktop.ini
 _empty_tmp/
 *.tmp
 ~$*.docx
+
+# tools/ — local SSH diagnostics (scripts are committed, outputs are not)
+tools/last_*.txt
+tools/check_out.txt
+tools/*_out.txt
